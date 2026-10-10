@@ -1,0 +1,115 @@
+# Step 2 - Configure the Jenkins server: Docker, k3s (Kubernetes) and Jenkins (in Docker).
+- hosts: all
+  become: yes
+  vars:
+    repo_dir: /home/ubuntu/blue-green-vle8
+    secrets_dir: /home/ubuntu/lab-secrets
+  tasks:
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install build plugin and helper packages
+      apt:
+        name: [docker-buildx, python3-docker, git, curl, jq]
+        state: present
+
+    - name: Start and enable Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Let the ubuntu user run docker
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Install k3s (single-node Kubernetes using the Docker engine as runtime)
+      shell: >
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_EXEC="--docker --write-kubeconfig-mode 600
+        --disable traefik --disable servicelb --disable metrics-server --disable local-storage"
+        sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the Kubernetes node to be Ready
+      command: k3s kubectl wait --for=condition=Ready node --all --timeout=180s
+      changed_when: false
+
+    - name: Create secrets and kubeconfig directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0700"
+      loop:
+        - "{{ secrets_dir }}"
+        - /home/ubuntu/.kube
+
+    - name: Generate Jenkins admin password (only once)
+      shell: umask 077 && openssl rand -base64 18 > {{ secrets_dir }}/jenkins-admin-pass
+      args:
+        creates: "{{ secrets_dir }}/jenkins-admin-pass"
+
+    - name: Kubeconfig for Jenkins and the ubuntu user
+      copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ item }}"
+        remote_src: yes
+        owner: ubuntu
+        group: ubuntu
+        mode: "0600"
+      loop:
+        - "{{ secrets_dir }}/kubeconfig"
+        - /home/ubuntu/.kube/config
+
+    - name: Fix secrets ownership (Jenkins runs as uid 1000 = ubuntu)
+      file:
+        path: "{{ secrets_dir }}/jenkins-admin-pass"
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Look up the docker group id
+      command: getent group docker
+      register: docker_group
+      changed_when: false
+
+    - name: Build the Jenkins image (wizard disabled, plugins + docker CLI + kubectl baked in)
+      community.docker.docker_image_build:
+        name: jenkins-bluegreen
+        tag: lts
+        path: "{{ repo_dir }}/jenkins"
+
+    - name: Run Jenkins (localhost only, JVM capped at 512 MB)
+      community.docker.docker_container:
+        name: jenkins
+        image: jenkins-bluegreen:lts
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        groups: ["{{ docker_group.stdout.split(':')[2] }}"]
+        env:
+          JAVA_OPTS: "-Xmx512m -Djenkins.install.runSetupWizard=false"
+          JENKINS_OPTS: "--httpListenAddress=127.0.0.1"
+          KUBECONFIG: /run/secrets/kubeconfig
+        volumes:
+          - jenkins_home:/var/jenkins_home
+          - /var/run/docker.sock:/var/run/docker.sock
+          - "{{ secrets_dir }}/kubeconfig:/run/secrets/kubeconfig:ro"
+          - "{{ secrets_dir }}/jenkins-admin-pass:/run/secrets/jenkins-admin-pass:ro"
+
+    - name: Wait for Jenkins to answer on 127.0.0.1:8080
+      uri:
+        url: http://127.0.0.1:8080/login
+        status_code: 200
+      register: jenkins_up
+      until: jenkins_up.status == 200
+      retries: 40
+      delay: 5

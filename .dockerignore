@@ -1,0 +1,3 @@
+# Only the web page goes into the image (COPY . would otherwise ship the whole repo)
+*
+!index.html
