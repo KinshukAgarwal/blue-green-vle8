@@ -86,7 +86,7 @@
         name: jenkins-bluegreen
         tag: lts
         path: "{{ repo_dir }}/jenkins"
-        rebuild: always   # Docker layer cache keeps this a no-op unless jenkins/ changed
+        rebuild: "{{ jenkins_rebuild | default('never') }}"   # -e jenkins_rebuild=always after editing jenkins/
 
     - name: Run Jenkins (localhost only, JVM capped at 512 MB)
       community.docker.docker_container:
