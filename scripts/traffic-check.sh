@@ -2,7 +2,8 @@
 # Zero-downtime probe: hit the Service continuously, log every response, report failures.
 # Usage: traffic-check.sh <seconds> [logfile]   (URL = ClusterIP of myapp-service)
 DUR=${1:-60}; LOG=${2:-/dev/null}
-URL="http://$(kubectl get svc myapp-service -o jsonpath='{.spec.clusterIP}')/"
+IP=$(kubectl get svc myapp-service -o jsonpath='{.spec.clusterIP}') || exit 1
+URL="http://$IP/"
 ts() { local f=${EPOCHREALTIME#*.}; printf '%(%T)T.%s' -1 "${f:0:3}"; }   # HH:MM:SS.mmm
 trap 'end=0' INT TERM   # stop early -> still print the summary
 end=$((SECONDS + DUR)); total=0; fail=0; blue=0; green=0; last=""
