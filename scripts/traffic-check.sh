@@ -3,12 +3,13 @@
 # Usage: traffic-check.sh <seconds> [logfile]   (URL = ClusterIP of myapp-service)
 DUR=${1:-60}; LOG=${2:-/dev/null}
 URL="http://$(kubectl get svc myapp-service -o jsonpath='{.spec.clusterIP}')/"
+ts() { local f=${EPOCHREALTIME#*.}; printf '%(%T)T.%s' -1 "${f:0:3}"; }   # HH:MM:SS.mmm
 end=$((SECONDS + DUR)); total=0; fail=0; blue=0; green=0; last=""
 : > "$LOG"
 while [ $SECONDS -lt $end ]; do
   out=$(curl -s -m 2 -w ' HTTP%{http_code}' "$URL"); rc=$?
   ver=$(grep -o 'VERSION [12] - [A-Z]*' <<<"$out"); code=${out##* }
-  total=$((total + 1)); ts=$(date +%T.%3N)
+  total=$((total + 1)); ts=$(ts)
   if [ $rc -ne 0 ] || [ "$code" != HTTP200 ] || [ -z "$ver" ]; then
     fail=$((fail + 1)); echo "$ts FAIL curl_rc=$rc $code" | tee -a "$LOG"; continue
   fi
