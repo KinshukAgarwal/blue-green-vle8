@@ -4,6 +4,7 @@
 DUR=${1:-60}; LOG=${2:-/dev/null}
 URL="http://$(kubectl get svc myapp-service -o jsonpath='{.spec.clusterIP}')/"
 ts() { local f=${EPOCHREALTIME#*.}; printf '%(%T)T.%s' -1 "${f:0:3}"; }   # HH:MM:SS.mmm
+trap 'end=0' INT TERM   # stop early -> still print the summary
 end=$((SECONDS + DUR)); total=0; fail=0; blue=0; green=0; last=""
 : > "$LOG"
 while [ $SECONDS -lt $end ]; do
